@@ -5,7 +5,7 @@ RUN apt update
 RUN apt install -y python3 python3-pip pipx git less vim \
     sudo cmake make g++-15 libjemalloc-dev clang-format clangd-19 \
     gnuplot net-tools libasio-dev libboost-all-dev libgtest-dev \
-    netcat-traditional
+    netcat-traditional wget
 
 # Update  gcc/g++ version to the latest ones
 RUN ln -fs /usr/bin/g++-15 /usr/bin/g++
