@@ -30,13 +30,13 @@ target_include_directories(${PROJECT_NAME}_imp PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${Boost_INCLUDE_DIRS}
 )
-target_link_libraries(${PROJECT_NAME}_imp PRIVATE ${Boost_LIBRARIES})
+target_link_libraries(${PROJECT_NAME}_imp PRIVATE ${Boost_LIBRARIES} ws2_32 mswsock)
 
 # Создаём исполняемый таргет и линкуем к нему статическую библиотеку
 add_executable(${PROJECT_NAME}
   "${CMAKE_SOURCE_DIR}/src/main.cpp"
   "${CMAKE_SOURCE_DIR}/src/headers.cpp")
-target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_imp)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_imp ws2_32 mswsock)
 
 #
 # Тесты
@@ -46,7 +46,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_imp)
 file(GLOB TEST_SRC_FILES "${CMAKE_SOURCE_DIR}/tests/*.cpp")
 
 add_executable(unit_tests "${TEST_SRC_FILES}")
-target_link_libraries(unit_tests PRIVATE ${PROJECT_NAME}_imp GTest::GTest GTest::Main)
+target_link_libraries(unit_tests PRIVATE ${PROJECT_NAME}_imp GTest::GTest GTest::Main ws2_32 mswsock)
 
 # Включаем тестирование
 enable_testing()

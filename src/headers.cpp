@@ -43,54 +43,56 @@ namespace {
 
 void iterHeaders(std::string_view req, Callback&& callback) 
 {
-  constexpr std::string_view line_delimetr = "/r/n"sv;
+    constexpr std::string_view line_delimiter = "\r\n";
 
-  std::size_t line_start = 0;
+    std::size_t pos = 0;
 
-  std::size_t first_line_end = req.find(line_delimetr);
-  if(first_line_end == std::string_view::npos)
-  {
-    return;
-  }
+    std::size_t line_end = req.find(line_delimiter, pos);
 
-  line_start = first_line_end + line_delimetr.size();
-
-  while(line_start < req.size())
-  {
-    std::size_t line_end = req.find(line_delimetr, line_start);
-    if(line_end == std::string_view::npos)
-    {
-      line_end = req.size();
+    if (line_end == std::string_view::npos) {
+        return;
     }
 
-    std::string_view line = req.substr(line_start, line_end - line_start);
+    pos = line_end + line_delimiter.size();
 
-    if(line.empty())
+    while (pos < req.size()) 
     {
-      break;
+        line_end = req.find(line_delimiter, pos);
+
+        if (line_end == std::string_view::npos) 
+        {
+            break;
+        }
+
+        std::string_view line = req.substr(pos, line_end - pos);
+
+        if (line.empty()) 
+        {
+            break;
+        }
+
+        std::size_t colon_pos = line.find(':');
+
+        if (colon_pos != std::string_view::npos) 
+        {
+            std::string_view name = line.substr(0, colon_pos);
+            std::string_view value = line.substr(colon_pos + 1);
+
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) 
+            {
+                value.remove_prefix(1);
+            }
+
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) 
+            {
+                value.remove_suffix(1);
+            }
+
+            callback(name, value);
+        }
+
+        pos = line_end + line_delimiter.size();
     }
-
-    std::size_t colon_pos = line.find(';');
-    if(colon_pos != std::string_view::npos)
-    {
-      std::string_view name = line.substr(0,colon_pos);
-      std::string_view value = line.substr(colon_pos + 1);
-
-      while(!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
-      {
-        value.remove_prefix(1);
-      }
-
-      callback(name, value);
-    }
-
-    if(line_end == req.size())
-    {
-      break;
-    }
-
-    line_start = line_end + line_delimetr.size();
-  }
 }
 
 std::pair<std::string, std::string> findHostPort(std::string_view req) 
@@ -125,32 +127,45 @@ std::pair<std::string, std::string> findHostPort(std::string_view req)
       throw std::runtime_error{"HTP request does not contain Host header"};
     }
 
-    return(host, port);
+    return{host, port};
 }
 
 std::optional<size_t> findContentLength(std::string_view rsp) 
 {
-  std::optional<size_t> result;
+    std::optional<size_t> result;
 
-  iterHeaders(rsp, [&](std::string_view name, std::string_view value) 
-  {
-    if(toLower(name) != "content-lenght")
+    iterHeaders(rsp, [&](std::string_view name, std::string_view value) 
     {
-      return;
-    }
+        if (toLower(name) != "content-length") 
+        {
+            return;
+        }
 
-    size_t content_lenght = 0;
+        value = std::string_view(value.data(), value.size());
 
-    auto begin = value.data();
-    auto end = value.data() + value.size();
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) 
+        {
+            value.remove_prefix(1);
+        }
 
-    auto [ptr, ec] = std::from_chars(begin, end, content_lenght);
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) 
+        {
+            value.remove_suffix(1);
+        }
 
-    if(ec == std::errc{} && ptr == end)
-    {
-      result = content_lenght;
-    }
-  });
+        size_t number = 0;
 
-  return result;   
+        auto [ptr, ec] = std::from_chars(
+            value.data(),
+            value.data() + value.size(),
+            number
+        );
+
+        if (ec == std::errc{}) 
+        {
+            result = number;
+        }
+    });
+
+    return result;
 }

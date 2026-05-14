@@ -1,7 +1,6 @@
 #include "headers.h"
 
 #include <boost/asio.hpp>
-#include <boost/asio/io_service.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/read.hpp>
@@ -15,7 +14,7 @@
 #include <stdexcept>
 #include <string>
 
-using boost::asio::io_service;
+using boost::asio::io_context;
 using boost::asio::co_spawn;
 using boost::asio::async_read_until;
 using boost::asio::awaitable;
@@ -30,7 +29,7 @@ using boost::asio::ip::tcp;
 constexpr std::string_view delimiter = "\r\n\r\n";
 
 
-awaitable<void> session(tcp::socket client_socket, io_service& io_service)
+awaitable<void> session(tcp::socket client_socket, io_context& io_context)
 {
   try
   {
@@ -48,26 +47,20 @@ awaitable<void> session(tcp::socket client_socket, io_service& io_service)
     std::cout << "Client requested host: " << host
               << ", port: " << port << std::endl;
 
-    tcp::resolver resolver(io_service);
+    tcp::resolver resolver(io_context);
 
-    auto endpoints = co_await resolver.async_resolve(
-      host, port, use_awaitable
-    );
+auto endpoints = co_await resolver.async_resolve(host, port, use_awaitable);
 
-    tcp::socket server_socket(io_service);
+tcp::socket server_socket(io_context);
 
-    co_await boost::asio::async_connect(
-      server_socket, endpoints, use_awaitable
-    );
+co_await boost::asio::async_connect(server_socket, endpoints, use_awaitable);
 
-    co_await boost::asio::async_connect(
-      server_socket, buffer(client_request), use_awaitable
-    );
+co_await boost::asio::async_write(server_socket, buffer(client_request), use_awaitable);
 
     std::string server_response;
 
     co_await boost::asio::async_read_until(
-      server_socket, dynamic_buffer(server_responce), delimiter, use_awaitable
+      server_socket, dynamic_buffer(server_response), delimiter, use_awaitable
     );
 
     auto content_lenght = findContentLength(server_response);
@@ -81,7 +74,7 @@ awaitable<void> session(tcp::socket client_socket, io_service& io_service)
         error_code ec;
 
         std::size_t bytes_read = co_await server_socket.async_read_some(
-          buffer(data), boost::asio::redirect_errors(use_awaitable, ec)
+          buffer(data), boost::asio::redirect_error(use_awaitable, ec)
         );
 
         if(ec == boost::asio::error::eof)
@@ -123,8 +116,8 @@ awaitable<void> session(tcp::socket client_socket, io_service& io_service)
       while(remaining > 0)
       {
         std::size_t bytes_to_read = std::min<std::size_t>(
-          sizeof(data);
-          remaining;
+          sizeof(data),
+          remaining
         );
 
         std::size_t bytes_read = co_await server_socket.async_read_some(
@@ -143,7 +136,7 @@ awaitable<void> session(tcp::socket client_socket, io_service& io_service)
     server_socket.close();
 
   }
-  catch(const std::excecption& e)
+  catch (const std::exception& e)
   {
     std::cerr << "Session error " << e.what() << std::endl;
   }
@@ -152,10 +145,10 @@ awaitable<void> session(tcp::socket client_socket, io_service& io_service)
 class Server
 {
 public:
-  Server(io_service& io_service, short port)
-    : io_service_(io_service)
-    , acceptor_(io_service, tcp::endpoint(tcp::v4(), port))
-    , socket_(io_service)
+Server(io_context& io_context, short port)
+    : io_context_(io_context)
+    , acceptor_(io_context, tcp::endpoint(tcp::v4(), port))
+    , socket_(io_context)
   {
     do_accept();
   }
@@ -169,9 +162,9 @@ private:
                 {
                     std::cout << "Accepted new connection" << std::endl;
 
-                    co_spawn(io_service_, session(std::move(socket_), io_service_), detached);
+                    co_spawn(io_context_, session(std::move(socket_), io_context_), boost::asio::detached);
 
-                    socket_ = tcp::socket(io_service_);
+                    socket_ = tcp::socket(io_context_);
                 } 
                 else 
                 {
@@ -184,7 +177,7 @@ private:
     }
 
 private:
-  io_service& io_service_;
+  io_context& io_context_;
   tcp::acceptor acceptor_;
   tcp::socket socket_;
 };
@@ -198,11 +191,11 @@ int main(int argc, char* argv[]) {
           return 1;
       }
 
-      io_service io_service(1);
+      io_context io_context(1);
 
-      Server server(io_service, static_cast<short>(std::atoi(argv[1])));
+      Server server(io_context, static_cast<short>(std::atoi(argv[1])));
 
-      io_service.run();
+      io_context.run();
 
     } 
     catch (const std::exception& e) 
