@@ -27,119 +27,189 @@ using boost::asio::ip::tcp;
 
 
 constexpr std::string_view delimiter = "\r\n\r\n";
+constexpr std::size_t MAX_HEADER_SIZE = 16 * 1024;
+constexpr std::size_t BUFFER_SIZE = 8192;
 
 
 awaitable<void> session(tcp::socket client_socket, io_context& io_context)
 {
-  try
-  {
-    std::string client_request;
+   try {
+        std::string client_request;
 
-    co_await boost::asio::async_read_until(
-      client_socket,
-      dynamic_buffer(client_request),
-      delimiter,
-      use_awaitable
-    );
-
-    auto [host, port] = findHostPort(client_request);
-
-    std::cout << "Client requested host: " << host
-              << ", port: " << port << std::endl;
-
-    tcp::resolver resolver(io_context);
-
-auto endpoints = co_await resolver.async_resolve(host, port, use_awaitable);
-
-tcp::socket server_socket(io_context);
-
-co_await boost::asio::async_connect(server_socket, endpoints, use_awaitable);
-
-co_await boost::asio::async_write(server_socket, buffer(client_request), use_awaitable);
-
-    std::string server_response;
-
-    co_await boost::asio::async_read_until(
-      server_socket, dynamic_buffer(server_response), delimiter, use_awaitable
-    );
-
-    auto content_lenght = findContentLength(server_response);
-
-    if(!content_lenght.has_value())
-    {
-      char data[8192];
-
-      while(true)
-      {
-        error_code ec;
-
-        std::size_t bytes_read = co_await server_socket.async_read_some(
-          buffer(data), boost::asio::redirect_error(use_awaitable, ec)
+        co_await boost::asio::async_read_until(
+            client_socket,
+            dynamic_buffer(client_request, MAX_HEADER_SIZE),
+            delimiter,
+            use_awaitable
         );
 
-        if(ec == boost::asio::error::eof)
-        {
-          break;
-        }
+        auto [host, port] = findHostPort(client_request);
 
-        if(ec)
-        {
-          throw boost::system::system_error(ec);
-        }
+        std::cout << "Client requested host: " << host
+                  << ", port: " << port << std::endl;
+
+        tcp::resolver resolver(io_context);
+
+        auto endpoints = co_await resolver.async_resolve(
+            host,
+            port,
+            use_awaitable
+        );
+
+        tcp::socket server_socket(io_context);
+
+        co_await boost::asio::async_connect(
+            server_socket,
+            endpoints,
+            use_awaitable
+        );
 
         co_await boost::asio::async_write(
-          client_socket, buffer(data, bytes_read), use_awaitable
-        );
-      }
-    }
-    else
-    {
-      std::size_t header_end = server_response.find(std::string(delimiter));
-
-      if(header_end == std::string::npos)
-      {
-        throw std::runtime_error{"Invalid http response"};
-      }
-
-      header_end += delimiter.size();
-
-      std::size_t already_have_body = server_response.size() - header_end;
-
-      std::size_t remaining = 0;
-      if(*content_lenght > already_have_body)
-      {
-        remaining = *content_lenght - already_have_body;
-      }
-
-      char data[8192];
-      
-      while(remaining > 0)
-      {
-        std::size_t bytes_to_read = std::min<std::size_t>(
-          sizeof(data),
-          remaining
+            server_socket,
+            buffer(client_request),
+            use_awaitable
         );
 
-        std::size_t bytes_read = co_await server_socket.async_read_some(
-          buffer(data, bytes_to_read), use_awaitable
-        );
+        if (auto request_content_length = findContentLength(client_request)) 
+        {
+            std::size_t header_end = client_request.find(std::string(delimiter));
 
-        remaining -= bytes_read;
+            if (header_end == std::string::npos) 
+            {
+                throw std::runtime_error("Invalid HTTP request");
+            }
+
+            header_end += delimiter.size();
+
+            std::size_t already_have_body = client_request.size() - header_end;
+
+            std::size_t remaining = 0;
+            if (*request_content_length > already_have_body) 
+            {
+                remaining = *request_content_length - already_have_body;
+            }
+
+            char data[BUFFER_SIZE];
+
+            while (remaining > 0) {
+                std::size_t bytes_to_read = std::min<std::size_t>(
+                    sizeof(data),
+                    remaining
+                );
+
+                std::size_t bytes_read = co_await client_socket.async_read_some(
+                    buffer(data, bytes_to_read),
+                    use_awaitable
+                );
+
+                remaining -= bytes_read;
+
+                co_await boost::asio::async_write(
+                    server_socket,
+                    buffer(data, bytes_read),
+                    use_awaitable
+                );
+            }
+        }
+
+        std::string server_response;
+
+        co_await boost::asio::async_read_until(
+            server_socket,
+            dynamic_buffer(server_response, MAX_HEADER_SIZE),
+            delimiter,
+            use_awaitable
+        );
 
         co_await boost::asio::async_write(
-          client_socket, buffer(data, bytes_read), use_awaitable
+            client_socket,
+            buffer(server_response),
+            use_awaitable
         );
-      }
+
+        auto response_content_length = findContentLength(server_response);
+
+        if (!response_content_length.has_value()) 
+        {
+            char data[BUFFER_SIZE];
+
+            while (true) 
+            {
+                error_code ec;
+
+                std::size_t bytes_read = co_await server_socket.async_read_some(
+                    buffer(data),
+                    boost::asio::redirect_error(use_awaitable, ec)
+                );
+
+                if (ec == boost::asio::error::eof) 
+                {
+                    break;
+                }
+
+                if (ec) 
+                {
+                    throw boost::system::system_error(ec);
+                }
+
+                co_await boost::asio::async_write(
+                    client_socket,
+                    buffer(data, bytes_read),
+                    use_awaitable
+                );
+            }
+        } 
+        else 
+        {
+            std::size_t header_end = server_response.find(std::string(delimiter));
+
+            if (header_end == std::string::npos) 
+            {
+                throw std::runtime_error("Invalid HTTP response");
+            }
+
+            header_end += delimiter.size();
+
+            std::size_t already_have_body = server_response.size() - header_end;
+
+            std::size_t remaining = 0;
+            if (*response_content_length > already_have_body) 
+            {
+                remaining = *response_content_length - already_have_body;
+            }
+
+            char data[BUFFER_SIZE];
+
+            while (remaining > 0) 
+            {
+                std::size_t bytes_to_read = std::min<std::size_t>(
+                    sizeof(data),
+                    remaining
+                );
+
+                std::size_t bytes_read = co_await server_socket.async_read_some(
+                    buffer(data, bytes_to_read),
+                    use_awaitable
+                );
+
+                remaining -= bytes_read;
+
+                co_await boost::asio::async_write(
+                    client_socket,
+                    buffer(data, bytes_read),
+                    use_awaitable
+                );
+            }
+        }
+
+        client_socket.close();
+        server_socket.close();
+
+    } 
+    catch (const std::exception& e) 
+    {
+        std::cerr << "Session error: " << e.what() << std::endl;
     }
-
-    client_socket.close();
-    server_socket.close();
-
-  }
-  catch (const std::exception& e)
-  {
-    std::cerr << "Session error " << e.what() << std::endl;
-  }
 }
 
 class Server
