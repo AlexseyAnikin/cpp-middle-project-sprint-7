@@ -7,6 +7,7 @@
 #include <charconv>
 #include <stdexcept>
 #include <string>
+#include <ranges>
 
 using namespace std::string_view_literals;
 
@@ -43,55 +44,48 @@ namespace {
 
 void iterHeaders(std::string_view req, Callback&& callback) 
 {
-    constexpr std::string_view line_delimiter = "\r\n";
+    bool first_line = true;
 
-    std::size_t pos = 0;
-
-    std::size_t line_end = req.find(line_delimiter, pos);
-
-    if (line_end == std::string_view::npos) {
-        return;
-    }
-
-    pos = line_end + line_delimiter.size();
-
-    while (pos < req.size()) 
+    for(auto line_range : req | std::views::split('\n'))
     {
-        line_end = req.find(line_delimiter, pos);
+        std::string_view line(line_range.begin(), line_range.end());
 
-        if (line_end == std::string_view::npos) 
+        if(!line.empty() && line.back() == '\r')
         {
-            break;
+            line.remove_suffix(1);
         }
 
-        std::string_view line = req.substr(pos, line_end - pos);
+        if(first_line)
+        {
+            first_line = false;
+            continue;
+        }
 
-        if (line.empty()) 
+        if(line.empty())
         {
             break;
         }
 
         std::size_t colon_pos = line.find(':');
-
-        if (colon_pos != std::string_view::npos) 
+        if(colon_pos == std::string::npos)
         {
-            std::string_view name = line.substr(0, colon_pos);
-            std::string_view value = line.substr(colon_pos + 1);
-
-            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) 
-            {
-                value.remove_prefix(1);
-            }
-
-            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) 
-            {
-                value.remove_suffix(1);
-            }
-
-            callback(name, value);
+            continue;
         }
 
-        pos = line_end + line_delimiter.size();
+        std::string_view name = line.substr(0, colon_pos);
+        std::string_view value = line.substr(colon_pos + 1);
+
+        while(!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+        {
+            value.remove_prefix(1);
+        }
+
+        while(!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+        {
+            value.remove_suffix(1);
+        }
+
+        callback(name, value);
     }
 }
 
